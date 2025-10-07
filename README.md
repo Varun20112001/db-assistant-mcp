@@ -220,7 +220,7 @@ This project is licensed under the MIT License - see the LICENSE file for detail
 
 For support and questions:
 - Open an issue on GitHub
-- Contact: [your-email@example.com]
+- Contact: [kanadevarun2001@gmail.com]
 
 ## 🙏 Acknowledgments
 
