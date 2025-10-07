@@ -1,4 +1,4 @@
-from mcp.server.fastmcp import FastMCP
+from fastmcp import FastMCP
 from sqlalchemy import create_engine, text
 from sqlalchemy import inspect
 from dotenv import load_dotenv
@@ -165,9 +165,3 @@ def ask_db(sql: str) -> dict:
 if __name__ == "__main__":
     # Run the MCP server
     mcp.run()
-
-# DB_NAME=app_db
-# DB_USER=postgres
-# DB_PASSWORD=postgres
-# DB_HOST=localhost
-# DB_PORT=5432
