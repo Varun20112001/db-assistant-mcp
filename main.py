@@ -4,6 +4,7 @@ from sqlalchemy import inspect
 from dotenv import load_dotenv
 import os
 import re
+import json
 
 load_dotenv()
 
@@ -84,51 +85,112 @@ except Exception as e:
     print(f"Failed to create engine: {e}", file=sys.stderr)
     raise
 
-# Introspect schema
-try:
-    inspector = inspect(engine)
-except Exception as e:
-    print(f"Failed to inspect engine: {e}", file=sys.stderr)
-    raise
-
-class Get_schema:
-    schema = {}
-    def __init__(self, engine):
-        self.engine = engine
-
-    def get_schema(self):
-        if self.schema:
-            return self.schema
-        else:
-            # Get the schema of the database
-            tables = inspector.get_table_names()
-
-            for table in tables:
-                if table.startswith("django_"):
-                    continue
-                columns = inspector.get_columns(table)
-                self.schema[table] = [col for col in columns]
-            return self.schema
-
 # Add a dynamic greeting resource
 @mcp.resource("greeting://{name}")
 def get_greeting(name: str) -> str:
     """Get a personalized greeting"""
     return f"Hello, {name}!"
 
-@mcp.resource("schema://")
+@mcp.tool("test_simple")
+def test_simple() -> str:
+    """Test if basic tool works"""
+    return "Simple test works"
+
+@mcp.tool("get_schema")
 def get_schema() -> str:
     """
-    This Python function retrieves the schema of a database by getting the table names and columns using
-    an inspector object.
-    :return: A dictionary containing the schema of the database, where the keys are table names and the
-    values are lists of column information for each table.
+    Get database schema information as a formatted string
     """
-    return Get_schema(engine).get_schema()
+    try:
+        with engine.connect() as conn:
+            # Get all table names
+            table_query = """
+                SELECT table_name 
+                FROM information_schema.tables 
+                WHERE table_schema = 'public' 
+                AND table_type = 'BASE TABLE'
+                ORDER BY table_name
+            """
+            table_result = conn.execute(text(table_query)).fetchall()
+            
+            schema_text = "Database Schema:\n\n"
+            
+            for table_row in table_result:
+                table_name = table_row[0]
+                if table_name.startswith("django_"):
+                    continue
+                
+                schema_text += f"Table: {table_name}\n"
+                schema_text += "-" * (len(table_name) + 7) + "\n"
+                
+                # Get column information
+                column_query = """
+                    SELECT 
+                        column_name,
+                        data_type,
+                        is_nullable,
+                        column_default
+                    FROM information_schema.columns 
+                    WHERE table_schema = 'public' 
+                    AND table_name = %s
+                    ORDER BY ordinal_position
+                """
+                column_result = conn.execute(text(column_query), (table_name,)).fetchall()
+                
+                for col_row in column_result:
+                    col_name, data_type, nullable, default = col_row
+                    nullable_str = "NULL" if nullable == "YES" else "NOT NULL"
+                    default_str = f" DEFAULT {default}" if default else ""
+                    schema_text += f"  {col_name}: {data_type} {nullable_str}{default_str}\n"
+                
+                # Get primary keys
+                pk_query = """
+                    SELECT column_name
+                    FROM information_schema.table_constraints tc
+                    JOIN information_schema.key_column_usage kcu
+                    ON tc.constraint_name = kcu.constraint_name
+                    WHERE tc.table_schema = 'public'
+                    AND tc.table_name = %s
+                    AND tc.constraint_type = 'PRIMARY KEY'
+                """
+                pk_result = conn.execute(text(pk_query), (table_name,)).fetchall()
+                if pk_result:
+                    pk_columns = [row[0] for row in pk_result]
+                    schema_text += f"  PRIMARY KEY: {', '.join(pk_columns)}\n"
+                
+                # Get foreign keys
+                fk_query = """
+                    SELECT 
+                        kcu.column_name,
+                        ccu.table_name AS foreign_table_name,
+                        ccu.column_name AS foreign_column_name
+                    FROM information_schema.table_constraints AS tc
+                    JOIN information_schema.key_column_usage AS kcu
+                    ON tc.constraint_name = kcu.constraint_name
+                    JOIN information_schema.constraint_column_usage AS ccu
+                    ON ccu.constraint_name = tc.constraint_name
+                    WHERE tc.constraint_type = 'FOREIGN KEY'
+                    AND tc.table_schema = 'public'
+                    AND tc.table_name = %s
+                """
+                fk_result = conn.execute(text(fk_query), (table_name,)).fetchall()
+                
+                for fk_row in fk_result:
+                    col_name, ref_table, ref_col = fk_row
+                    schema_text += f"  FOREIGN KEY: {col_name} -> {ref_table}.{ref_col}\n"
+                
+                schema_text += "\n"
+            
+            return schema_text
     
+    except Exception as e:
+        return f"Error getting schema: {str(e)}"
+        
+    except Exception as e:
+        return {"error": f"Failed to get schema: {str(e)}"}
 
 
-@mcp.tool()
+@mcp.tool("ask_db")
 def ask_db(sql: str) -> dict:
     """
     The function `ask_db` executes a SQL query and returns the result in a dictionary format.
